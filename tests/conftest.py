@@ -12,11 +12,12 @@ import pytest
 from .helpers import VHM
 
 
-BASE_URL = "http://volto.localhost"
+BASE_URL = "http://plone.localhost"
+API_URL = f"{BASE_URL}/++api++"
 
-BACKEND_URL = "http://volto.localhost:8080/Plone"
+BACKEND_URL = "http://plone.localhost:8080/Plone"
 
-VARNISH_URL = "http://volto.localhost:8000/"
+VARNISH_URL = "http://plone.localhost:8000/"
 
 REPO_DIR = Path(__file__).parent.parent
 
@@ -30,7 +31,7 @@ def repo_dir() -> Path:
 
 @pytest.fixture(scope="session")
 def varnish_client() -> httpx.Client:
-    client = httpx.Client(base_url=VARNISH_URL, headers={"Host": "varnish"})
+    client = httpx.Client(base_url=VARNISH_URL, headers={"Host": "plone.localhost"})
     yield client
     client.close()
 
@@ -46,11 +47,50 @@ def anon_client() -> httpx.Client:
 
 
 @pytest.fixture(scope="session")
-def auth_client() -> httpx.Client:
+def auth_root_client() -> httpx.Client:
     client = httpx.Client(
         base_url=BASE_URL,
         headers={"Accept": "application/json"},
         auth=("admin", "admin"),
+    )
+    yield client
+    client.close()
+
+
+@pytest.fixture(scope="session")
+def auth_client() -> httpx.Client:
+    resp = httpx.post(
+        f'{API_URL}/@users',
+        headers={'Accept': 'application/json', 'Content-Type': 'application/json'},
+        json={
+            'description': 'Professor of Linguistics',
+            'email': 'noam.chomsky@example.com',
+            'fullname': 'Noam Avram Chomsky',
+            'home_page': 'web.mit.edu/chomsky',
+            'location': 'Cambridge, MA',
+            'password': '12345678',
+            'roles': ['Manager'],
+            'username': 'noamchomsky'
+        },
+        auth=('admin', 'admin')
+    )
+    response = httpx.post(
+        f'{API_URL}/@login',
+        headers={'Accept': 'application/json', 'Content-Type': 'application/json'},
+        json={
+            'password': '12345678',
+            'login': 'noamchomsky'
+        },
+    )
+    data = response.json()
+    token = data["token"]
+
+    client = httpx.Client(
+        base_url=BASE_URL,
+        headers={
+            "Accept": "application/json",
+            "Authorization": f"Bearer {token}"
+        },
     )
     yield client
     client.close()
@@ -66,16 +106,19 @@ def init_data() -> list:
         container_url = f"/++api++{container}"
         url = f"{container_url}/{o_id}"
         data.append((url, container_url, payload))
+
     return data
 
 
 @pytest.fixture(scope="session", autouse=True)
-def site(auth_client, init_data, varnish_client):
+def site(auth_root_client, init_data, varnish_client):
     """Create content."""
     # Check if api is up
     while True:
         try:
-            response = varnish_client.get(VHM)
+            response = varnish_client.get(
+                "/++api++/"
+            )
             assert response.status_code == 200
         except:
             sleep(5)
@@ -92,21 +135,21 @@ def site(auth_client, init_data, varnish_client):
     # Setup default content
     for url, container_url, payload in init_data:
         # Check if content exists
-        response = auth_client.get(url)
+        response = auth_root_client.get(url)
         if response.status_code != 404:
             # Content exists
             continue
         transitions = payload.pop("_transitions", [])
-        response = auth_client.post(container_url, json=payload)
+        response = auth_root_client.post(container_url, json=payload)
         if response.status_code >= 400:
             breakpoint()
         for transition in transitions:
-            response = auth_client.post(f"{url}/@workflow/{transition}")
+            response = auth_root_client.post(f"{url}/@workflow/{transition}")
     yield "/"
     # Remove default content
     to_delete = reversed(init_data)
     for url, *_ in to_delete:
-        response = auth_client.delete(url)
+        response = auth_root_client.delete(url)
 
 
 @pytest.fixture

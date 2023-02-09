@@ -5,22 +5,14 @@ services:
 
     ports:
       - 80:80
-      - 443:443
 
     labels:
       - traefik.enable=true
       - traefik.constraint-label=public
-      - traefik.http.middlewares.admin-auth.basicauth.users=admin:$$apr1$$TnjkUtcI$$398fPEsdmXbqF99VdWgb2/
-      - traefik.http.routers.traefik-public-https.rule=Host(`traefik.localhost`)
-      - traefik.http.routers.traefik-public-https.entrypoints=https
-      - traefik.http.routers.traefik-public-https.tls=true
-      - traefik.http.routers.traefik-public-https.service=api@internal
-      - traefik.http.routers.traefik-public-https.middlewares=admin-auth
-      - traefik.http.services.traefik-public.loadbalancer.server.port=8000
 
       # GENERIC MIDDLEWARES
-      - traefik.http.middlewares.https-redirect.redirectscheme.scheme=https
-      - traefik.http.middlewares.https-redirect.redirectscheme.permanent=true
+      # - traefik.http.middlewares.https-redirect.redirectscheme.scheme=https
+      # - traefik.http.middlewares.https-redirect.redirectscheme.permanent=true
       - traefik.http.middlewares.gzip.compress=true
       - traefik.http.middlewares.gzip.compress.excludedcontenttypes=image/png, image/jpeg, font/woff2
 
@@ -38,7 +30,7 @@ services:
       - --providers.docker.constraints=Label(`traefik.constraint-label`, `public`)
       - --providers.docker.exposedbydefault=false
       - --entrypoints.http.address=:80
-      - --entrypoints.https.address=:443
+      # - --entrypoints.https.address=:443
       - --accesslog
       - --accesslog.format=json
       - --accesslog.fields.headers.names.X-Varnish-Routed=keep
@@ -53,7 +45,7 @@ services:
       dockerfile: Dockerfile
     environment:
       RAZZLE_INTERNAL_API_PATH: http://backend:8080/Plone
-      RAZZLE_API_PATH: https://plone.localhost
+      RAZZLE_API_PATH: http://plone.localhost
       DEBUG: superagent
     labels:
       - traefik.enable=true
@@ -62,8 +54,7 @@ services:
       - traefik.http.services.frontend.loadbalancer.server.port=3000
       # Router: Varnish Public
       - traefik.http.routers.frontend-varnish.rule=Host(`plone.localhost`)
-      - traefik.http.routers.frontend-varnish.entrypoints=https
-      - traefik.http.routers.frontend-varnish.tls=true
+      - traefik.http.routers.frontend-varnish.entrypoints=http
       - traefik.http.routers.frontend-varnish.service=varnish
       - traefik.http.routers.frontend-varnish.middlewares=gzip
       # Router: Internal
@@ -89,19 +80,17 @@ services:
       - traefik.http.services.backend.loadbalancer.server.port=8080
       # Middleware
       - "traefik.http.middlewares.backend-vhm.replacepathregex.regex=^/\\+\\+api\\+\\+($$|/.*)"
-      - "traefik.http.middlewares.backend-vhm.replacepathregex.replacement=/VirtualHostBase/https/plone.localhost/Plone/++api++/VirtualHostRoot/$$1"
+      - "traefik.http.middlewares.backend-vhm.replacepathregex.replacement=/VirtualHostBase/http/plone.localhost/Plone/++api++/VirtualHostRoot/$$1"
       - "traefik.http.middlewares.backend-ui.replacepathregex.regex=^/ClassicUI($$|/.*)"
-      - "traefik.http.middlewares.backend-ui.replacepathregex.replacement=/VirtualHostBase/https/plone.localhost/Plone/VirtualHostRoot/_vh_ClassicUI$$1"
+      - "traefik.http.middlewares.backend-ui.replacepathregex.replacement=/VirtualHostBase/http/plone.localhost/Plone/VirtualHostRoot/_vh_ClassicUI$$1"
       # Router: Varnish Public
       - traefik.http.routers.backend-varnish.rule=Host(`plone.localhost`) && PathPrefix(`/++api++`)
-      - traefik.http.routers.backend-varnish.entrypoints=https
-      - traefik.http.routers.backend-varnish.tls=true
+      - traefik.http.routers.backend-varnish.entrypoints=http
       - traefik.http.routers.backend-varnish.service=varnish
       - traefik.http.routers.backend.middlewares=gzip
 
       - traefik.http.routers.backend-cl-varnish.rule=Host(`plone.localhost`) && PathPrefix(`/ClassicUI`)
-      - traefik.http.routers.backend-cl-varnish.entrypoints=https
-      - traefik.http.routers.backend-cl-varnish.tls=true
+      - traefik.http.routers.backend-cl-varnish.entrypoints=http
       - traefik.http.routers.backend-cl-varnish.service=varnish
       - traefik.http.routers.backend-cl-varnish.middlewares=gzip
 

@@ -29,12 +29,13 @@ sub vcl_init {
 sub vcl_recv {
   set req.backend_hint = cluster_loadbalancer.backend();
   set req.http.X-Varnish-Routed = "1";
+  set req.http.X-Varnish-ReqType = "Default";
 
   # Sanitize cookies so they do not needlessly destroy cacheability for anonymous pages
   if (req.http.Cookie) {
     set req.http.Cookie = ";" + req.http.Cookie;
     set req.http.Cookie = regsuball(req.http.Cookie, "; +", ";");
-    set req.http.Cookie = regsuball(req.http.Cookie, ";(sticky|I18N_LANGUAGE|statusmessages|__ac|_ZopeId|__cp|beaker\.session|authomatic|serverid|__rf)=", "; \1=");
+    set req.http.Cookie = regsuball(req.http.Cookie, ";(sticky|I18N_LANGUAGE|statusmessages|__ac|_ZopeId|__cp|beaker\.session|authomatic|serverid|__rf|auth_token)=", "; \1=");
     set req.http.Cookie = regsuball(req.http.Cookie, ";[^ ][^;]*", "");
     set req.http.Cookie = regsuball(req.http.Cookie, "^[; ]+|[; ]+$", "");
 
@@ -44,11 +45,11 @@ sub vcl_recv {
   }
 
   if (
-      (req.http.Cookie && (req.http.Cookie ~ "__ac(_(name|password|persistent))?=" || req.http.Cookie ~ "_ZopeId")) ||
+      (req.http.Cookie && (req.http.Cookie ~ "__ac(_(name|password|persistent))?=" || req.http.Cookie ~ "_ZopeId" || req.http.Cookie ~ "auth_token")) ||
       (req.http.Authenticate) ||
       (req.http.Authorization)
   ) {
-    set req.http.Cookied = "1";
+    set req.http.X-Varnish-ReqType = "Auth";
     return(pass);
   }
 
@@ -89,13 +90,15 @@ sub vcl_recv {
       return(pass);
   }
 
-  if (
-    (req.url ~ "\/@@(images|download|)\/?(.*)?$") ||
-    (req.url ~ "\/++api++/?(.*)?$")
-  ) {
+  if (req.url ~ "\/@@(images|download|)\/?(.*)?$"){
+    set req.http.X-Varnish-ReqType = "Blob";
+    return(hash);
+  } elseif (req.url ~ "\/\+\+api\+\+/?(.*)?$") {
+    set req.http.X-Varnish-ReqType = "api";
     return(hash);
   } else {
-    return(pass);
+    set req.http.X-Varnish-ReqType = "Express";
+    return(hash);
   }
 
 }
@@ -124,6 +127,8 @@ sub vcl_hit {
 
 sub vcl_backend_response {
 
+  set beresp.http.X-Varnish-ReqType = bereq.http.X-Varnish-ReqType;
+
   # Don't allow static files to set cookies.
   # (?i) denotes case insensitive in PCRE (perl compatible regular expressions).
   # make sure you edit both and keep them equal.
@@ -150,6 +155,15 @@ sub vcl_backend_response {
     set beresp.http.X-Varnish-Action = "FETCH (pass - authorized and no public cache control)";
     set beresp.uncacheable = true;
     set beresp.ttl = 120s;
+    return(deliver);
+  }
+
+  # Use this rule IF no cache-control
+  if ((beresp.http.X-Varnish-ReqType ~ "Express") && (!beresp.http.Cache-Control)) {
+    set beresp.http.X-Varnish-Action = "INSERT (10s caching)";
+    set beresp.uncacheable = false;
+    set beresp.ttl = 10s;
+    set beresp.grace = 20s;
     return(deliver);
   }
 
@@ -191,7 +205,11 @@ sub vcl_deliver {
   set resp.http.X-Grace = obj.grace;
 
   # User is validated
-  if (req.http.Authorization) {
+  if (
+      (req.http.Cookie && (req.http.Cookie ~ "__ac(_(name|password|persistent))?=" || req.http.Cookie ~ "_ZopeId" || req.http.Cookie ~ "auth_token")) ||
+      (req.http.Authenticate) ||
+      (req.http.Authorization)
+  ) {
     set resp.http.X-Auth = "Logged-in";
   } else {
     set resp.http.X-Auth = "Anon";
