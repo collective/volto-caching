@@ -3,57 +3,32 @@ vcl 4.0;
 import std;
 import directors;
 
-/* Configure zope clients as backends */
-
-backend client_01_8080 {
-  .host = "backend";
-  .port = "8080";
-  .connect_timeout = 0.4s;
-  .first_byte_timeout = 300s;
-  .between_bytes_timeout = 60s;
-  .probe = {
-    .url = "/ok";
-    .timeout = 5s;
-    .interval = 15s;
-    .window = 10;
-    .threshold = 8;
-  }
+backend traefik_loadbalancer {
+    .host = "webserver";
+    .port = "80";
+    .connect_timeout = 2s;
+    .first_byte_timeout = 300s;
+    .between_bytes_timeout  = 60s;
 }
 
-
 /* Only allow PURGE from localhost and API-Server */
-acl purge_allowed {
+acl purge {
   "localhost";
   "backend";
   "127.0.0.1";
   "172.16.0.0/12";
+  "10.0.0.0/8";
   "192.168.0.0/16";
 }
 
 sub vcl_init {
-  # Use round_robin director type
-  new cluster = directors.round_robin();
-  cluster.add_backend(client_01_8080);
+  new cluster_loadbalancer = directors.round_robin();
+  cluster_loadbalancer.add_backend(traefik_loadbalancer);
 }
 
 sub vcl_recv {
-  # Send requests to the cluster using a round robin director
-  set req.backend_hint = cluster.backend();
-
-  # Sanitize compression handling
-  if (req.http.Accept-Encoding) {
-    if (req.url ~ "\.(jpg|png|gif|gz|tgz|bz2|tbz|mp3|ogg)$") {
-        # No point in compressing these
-        unset req.http.Accept-Encoding;
-    } elsif (req.http.Accept-Encoding ~ "gzip") {
-        set req.http.Accept-Encoding = "gzip";
-    } elsif (req.http.Accept-Encoding ~ "deflate" && req.http.user-agent !~ "MSIE") {
-        set req.http.Accept-Encoding = "deflate";
-    } else {
-        # unknown algorithm
-        unset req.http.Accept-Encoding;
-    }
-  }
+  set req.backend_hint = cluster_loadbalancer.backend();
+  set req.http.X-Varnish-Routed = "1";
 
   # Sanitize cookies so they do not needlessly destroy cacheability for anonymous pages
   if (req.http.Cookie) {
@@ -68,30 +43,60 @@ sub vcl_recv {
     }
   }
 
-  # POST, Logins and edits
-  if (req.method == "POST" || req.method == "PATCH" || req.method == "DELETE") {
-      return(pass);
-  } elsif (req.method == "PURGE" || req.method == "BAN") {
-    if (client.ip !~ purge_allowed) {
-        return (synth(403, req.method + " not allowed from " + client.ip + ". Access denied."));
-    }
-    if (!req.http.x-invalidate-pattern) {
-        # Purge
-        return (purge);
-    }
-    if (std.ban(req.http.x-invalidate-pattern)) {
-        return (synth(200, "BAN added " + req.http.x-invalidate-pattern));
-    } else {
-        return (synth(400, std.ban_error()));
-    }
-  }
-
-  /* If user is validated, PASS, unconditionally */
-  if (req.http.Authorization) {
+  if (
+      (req.http.Cookie && (req.http.Cookie ~ "__ac(_(name|password|persistent))?=" || req.http.Cookie ~ "_ZopeId")) ||
+      (req.http.Authenticate) ||
+      (req.http.Authorization)
+  ) {
+    set req.http.Cookied = "1";
     return(pass);
   }
 
-  return(hash);
+  set req.http.Cookied = "0";
+
+  if (req.method == "PURGE") {
+      if (!client.ip ~ purge) {
+          return (synth(405, "Not allowed."));
+      } else {
+          ban("req.url == " + req.url);
+          return (synth(200, "Purged."));
+      }
+
+  } elseif (req.method == "BAN") {
+      # Same ACL check as above:
+      if (!client.ip ~ purge) {
+          return (synth(405, "Not allowed."));
+      }
+      ban("req.http.host == " + req.http.host + "&& req.url == " + req.url);
+      # Throw a synthetic page so the
+      # request won't go to the backend.
+      return (synth(200, "Ban added"));
+
+  } elseif (req.method != "GET" &&
+      req.method != "HEAD" &&
+      req.method != "PUT" &&
+      req.method != "POST" &&
+      req.method != "PATCH" &&
+      req.method != "TRACE" &&
+      req.method != "OPTIONS" &&
+      req.method != "DELETE") {
+      /* Non-RFC2616 or CONNECT which is weird. */
+      return (pipe);
+  } elseif (req.method != "GET" &&
+      req.method != "HEAD" &&
+      req.method != "OPTIONS") {
+      /* POST, PUT, PATCH will pass, always */
+      return(pass);
+  }
+
+  if (
+    (req.url ~ "\/@@(images|download|)\/?(.*)?$") ||
+    (req.url ~ "\/++api++/?(.*)?$")
+  ) {
+    return(hash);
+  } else {
+    return(pass);
+  }
 
 }
 

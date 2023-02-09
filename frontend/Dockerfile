@@ -1,1 +1,1 @@
-FROM plone/plone-frontend:15.3.0
+FROM plone/plone-frontend:16.9.0
