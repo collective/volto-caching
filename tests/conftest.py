@@ -40,7 +40,10 @@ def varnish_client() -> httpx.Client:
 def anon_client() -> httpx.Client:
     client = httpx.Client(
         base_url=BASE_URL,
-        headers={"Accept": "application/json"},
+        headers={
+            "Accept": "application/json",
+            "x-vcl-debug": "1"
+        },
     )
     yield client
     client.close()
@@ -89,6 +92,7 @@ def auth_client() -> httpx.Client:
         base_url=BASE_URL,
         headers={
             "Accept": "application/json",
+            "x-vcl-debug": "1",
             "Authorization": f"Bearer {token}"
         },
     )

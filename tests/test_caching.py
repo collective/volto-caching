@@ -44,9 +44,9 @@ def test_varnish_in_front_of_express_cache(anon_client, purge_url, url: str):
     headers = response.headers
     # Passing via Varnish
     assert headers.get("x-varnish") is not None
-    assert headers.get("x-varnish-reqtype") == "Express"
+    assert headers.get("x-varnish-reqtype") == "express"
     assert headers.get("x-hits") == '0'
-    assert headers.get("x-ttl") == '10.000'
+    assert headers.get("x-varnish-ttl") == '10.000'
 
     # Second request will get cached version
     # Fix me
@@ -72,7 +72,7 @@ def test_varnish_in_front_of_express_with_cache(anon_client, url: str):
     assert response.status_code == 200
     headers = response.headers
     assert int(headers.get("x-hits")) > 0
-    assert headers.get("x-varnish-reqtype") == "Blob"
+    assert headers.get("x-varnish-reqtype") == "blob"
 
 
 @pytest.fixture(scope="module")

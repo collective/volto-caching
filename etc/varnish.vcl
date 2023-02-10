@@ -21,6 +21,34 @@ acl purge {
   "192.168.0.0/16";
 }
 
+
+sub detect_auth{
+  unset req.http.x-auth;
+  if (
+      (req.http.Cookie && (
+        req.http.Cookie ~ "__ac(_(name|password|persistent))?=" || req.http.Cookie ~ "_ZopeId" || req.http.Cookie ~ "auth_token")) ||
+      (req.http.Authenticate) ||
+      (req.http.Authorization)
+  ) {
+    set req.http.x-auth = true;
+  }
+}
+
+
+sub detect_requesttype{
+  unset req.http.x-varnish-reqtype;
+  set req.http.x-varnish-reqtype = "Default";
+  if (req.http.x-auth){
+    set req.http.x-varnish-reqtype = "auth";
+  } elseif (req.url ~ "\/@@(images|download|)\/?(.*)?$"){
+    set req.http.x-varnish-reqtype = "blob";
+  } elseif (req.url ~ "\/\+\+api\+\+/?(.*)?$") {
+    set req.http.x-varnish-reqtype = "api";
+  } else {
+    set req.http.x-varnish-reqtype = "express";
+  }
+}
+
 sub vcl_init {
   new cluster_loadbalancer = directors.round_robin();
   cluster_loadbalancer.add_backend(traefik_loadbalancer);
@@ -29,7 +57,12 @@ sub vcl_init {
 sub vcl_recv {
   set req.backend_hint = cluster_loadbalancer.backend();
   set req.http.X-Varnish-Routed = "1";
-  set req.http.X-Varnish-ReqType = "Default";
+
+  # Annotate request with x-auth indicating if request is authenticated or not
+  call detect_auth;
+
+  # Annotate request with x-varnish-reqtype with a classification for the request
+  call detect_requesttype;
 
   # Sanitize cookies so they do not needlessly destroy cacheability for anonymous pages
   if (req.http.Cookie) {
@@ -44,16 +77,9 @@ sub vcl_recv {
     }
   }
 
-  if (
-      (req.http.Cookie && (req.http.Cookie ~ "__ac(_(name|password|persistent))?=" || req.http.Cookie ~ "_ZopeId" || req.http.Cookie ~ "auth_token")) ||
-      (req.http.Authenticate) ||
-      (req.http.Authorization)
-  ) {
-    set req.http.X-Varnish-ReqType = "Auth";
+  if (req.http.x-auth) {
     return(pass);
   }
-
-  set req.http.Cookied = "0";
 
   if (req.method == "PURGE") {
       if (!client.ip ~ purge) {
@@ -90,17 +116,7 @@ sub vcl_recv {
       return(pass);
   }
 
-  if (req.url ~ "\/@@(images|download|)\/?(.*)?$"){
-    set req.http.X-Varnish-ReqType = "Blob";
-    return(hash);
-  } elseif (req.url ~ "\/\+\+api\+\+/?(.*)?$") {
-    set req.http.X-Varnish-ReqType = "api";
-    return(hash);
-  } else {
-    set req.http.X-Varnish-ReqType = "Express";
-    return(hash);
-  }
-
+  return(hash);
 }
 
 sub vcl_pipe {
@@ -127,7 +143,7 @@ sub vcl_hit {
 
 sub vcl_backend_response {
 
-  set beresp.http.X-Varnish-ReqType = bereq.http.X-Varnish-ReqType;
+  set beresp.http.x-varnish-reqtype = bereq.http.x-varnish-reqtype;
 
   # Don't allow static files to set cookies.
   # (?i) denotes case insensitive in PCRE (perl compatible regular expressions).
@@ -136,13 +152,13 @@ sub vcl_backend_response {
     unset beresp.http.set-cookie;
   }
   if (beresp.http.Set-Cookie) {
-    set beresp.http.X-Varnish-Action = "FETCH (pass - response sets cookie)";
+    set beresp.http.x-varnish-action = "FETCH (pass - response sets cookie)";
     set beresp.uncacheable = true;
     set beresp.ttl = 120s;
     return(deliver);
   }
   if (beresp.http.Cache-Control ~ "(private|no-cache|no-store)") {
-    set beresp.http.X-Varnish-Action = "FETCH (pass - cache control disallows)";
+    set beresp.http.x-varnish-action = "FETCH (pass - cache control disallows)";
     set beresp.uncacheable = true;
     set beresp.ttl = 120s;
     return(deliver);
@@ -152,15 +168,15 @@ sub vcl_backend_response {
   # Do NOT cache if there is an "Authorization" header
   # beresp never has an Authorization header in beresp, right?
   if (beresp.http.Authorization) {
-    set beresp.http.X-Varnish-Action = "FETCH (pass - authorized and no public cache control)";
+    set beresp.http.x-varnish-action = "FETCH (pass - authorized and no public cache control)";
     set beresp.uncacheable = true;
     set beresp.ttl = 120s;
     return(deliver);
   }
 
   # Use this rule IF no cache-control
-  if ((beresp.http.X-Varnish-ReqType ~ "Express") && (!beresp.http.Cache-Control)) {
-    set beresp.http.X-Varnish-Action = "INSERT (10s caching)";
+  if ((bereq.http.x-varnish-reqtype ~ "express") && (!beresp.http.Cache-Control)) {
+    set beresp.http.x-varnish-action = "INSERT (10s caching)";
     set beresp.uncacheable = false;
     set beresp.ttl = 10s;
     set beresp.grace = 20s;
@@ -168,50 +184,42 @@ sub vcl_backend_response {
   }
 
   if (!beresp.http.Cache-Control) {
-    set beresp.http.X-Varnish-Action = "FETCH (override - backend not setting cache control)";
+    set beresp.http.x-varnish-action = "FETCH (override - backend not setting cache control)";
     set beresp.uncacheable = true;
     set beresp.ttl = 120s;
     return (deliver);
   }
 
   if (beresp.http.X-Anonymous && !beresp.http.Cache-Control) {
-    set beresp.http.X-Varnish-Action = "FETCH (override - anonymous backend not setting cache control)";
+    set beresp.http.x-varnish-action = "FETCH (override - anonymous backend not setting cache control)";
     set beresp.ttl = 600s;
     return (deliver);
   }
 
-  set beresp.http.X-Varnish-Action = "FETCH (insert)";
-  if (bereq.http.x-vcl-debug) {
-    set beresp.http.x-varnish-uncacheable = beresp.uncacheable;
-    set beresp.http.x-varnish-ttl = beresp.ttl;
-    set beresp.http.x-varnish-grace = beresp.grace;
-  }
-
+  set beresp.http.x-varnish-action = "FETCH (insert)";
   return (deliver);
 }
 
 sub vcl_deliver {
 
-  set resp.http.X-Powered-By = "Plone (https://plone.org)";
+  set resp.http.x-powered-by = "Plone (https://plone.org)";
 
-  if (obj.hits > 0) {
-    set resp.http.X-Cache = "HIT";
+  if (req.http.x-vcl-debug) {
+    set resp.http.x-varnish-ttl = obj.ttl;
+    set resp.http.x-varnish-grace = obj.grace;
+    set resp.http.x-hits = obj.hits;
+    set resp.http.x-varnish-reqtype = req.http.x-varnish-reqtype;
+    if (req.http.x-auth) {
+      set resp.http.x-auth = "Logged-in";
+    } else {
+      set resp.http.x-auth = "Anon";
+    }
+    if (obj.hits > 0) {
+      set resp.http.x-cache = "HIT";
+    } else {
+      set resp.http.x-cache = "MISS";
+    }
   } else {
-    set resp.http.X-Cache = "MISS";
-  }
-
-  set resp.http.X-Hits = obj.hits;
-  set resp.http.X-TTL = obj.ttl;
-  set resp.http.X-Grace = obj.grace;
-
-  # User is validated
-  if (
-      (req.http.Cookie && (req.http.Cookie ~ "__ac(_(name|password|persistent))?=" || req.http.Cookie ~ "_ZopeId" || req.http.Cookie ~ "auth_token")) ||
-      (req.http.Authenticate) ||
-      (req.http.Authorization)
-  ) {
-    set resp.http.X-Auth = "Logged-in";
-  } else {
-    set resp.http.X-Auth = "Anon";
+    unset resp.http.x-varnish-action;
   }
 }
