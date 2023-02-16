@@ -1,7 +1,6 @@
-FROM plone/plone-backend:6.0.0a3
+# syntax=docker/dockerfile:1
+FROM plone/plone-backend:6.0.1
 
-USER root
-
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends libmagic1 \
-    && rm -rf /var/lib/apt/lists/* /usr/share/doc
+RUN <<EOT
+    ./bin/pip install "https://github.com/plone/plone.restapi/archive/refs/heads/issue-1587-purge.zip"
+EOT

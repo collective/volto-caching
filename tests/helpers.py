@@ -3,7 +3,7 @@ import re
 
 
 PATTERN = r"^/(\+\+api\+\+\/?)+($|/.*)"
-VHM = "/VirtualHostBase/http/volto.localhost:80/Plone/++api++/VirtualHostRoot"
+VHM = "/VirtualHostBase/http/plone.localhost:80/Plone/++api++/VirtualHostRoot"
 
 
 def nginx_rewrite(url: str) -> str:

@@ -1,34 +1,70 @@
 version: "3"
 services:
-
   webserver:
-    image: nginx
-    volumes:
-      - ./etc/nginx.conf:/etc/nginx/conf.d/default.conf
-    depends_on:
-      - backend
-      - frontend
+    image: traefik:v2.9
+
     ports:
-    - "80:80"
+      - 80:80
+
+    labels:
+      - traefik.enable=true
+      - traefik.constraint-label=public
+
+      # GENERIC MIDDLEWARES
+      # - traefik.http.middlewares.https-redirect.redirectscheme.scheme=https
+      # - traefik.http.middlewares.https-redirect.redirectscheme.permanent=true
+      - traefik.http.middlewares.gzip.compress=true
+      - traefik.http.middlewares.gzip.compress.excludedcontenttypes=image/png, image/jpeg, font/woff2
+
+      # GENERIC ROUTERS
+      # - traefik.http.routers.generic-https-redirect.entrypoints=http
+      # - traefik.http.routers.generic-https-redirect.rule=HostRegexp(`{host:.*}`)
+      # - traefik.http.routers.generic-https-redirect.priority=1
+      # - traefik.http.routers.generic-https-redirect.middlewares=https-redirect
+
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+
+    command:
+      - --providers.docker
+      - --providers.docker.constraints=Label(`traefik.constraint-label`, `public`)
+      - --providers.docker.exposedbydefault=false
+      - --entrypoints.http.address=:80
+      # - --entrypoints.https.address=:443
+      - --accesslog
+      - --accesslog.format=json
+      - --accesslog.fields.headers.names.X-Varnish-Routed=keep
+      - --accesslog.fields.headers.names.RequestHost=keep
+      - --log
+      - --log.level=DEBUG
+      - --api
 
   frontend:
     build:
       context: frontend
       dockerfile: Dockerfile
     environment:
-      RAZZLE_INTERNAL_API_PATH: http://webserver:80
-      # RAZZLE_DEV_PROXY_API_PATH: http://varnish:80
-    ports:
-    - "3000:3000"
-
-  varnish:
-    image: varnish:7.1.0
-    volumes:
-      - ./etc/varnish.vcl:/etc/varnish/default.vcl
-    ports:
-      - "8000:80"
+      RAZZLE_INTERNAL_API_PATH: http://backend:8080/Plone
+      RAZZLE_API_PATH: http://plone.localhost
+      DEBUG: superagent
+    labels:
+      - traefik.enable=true
+      - traefik.constraint-label=public
+      # Service
+      - traefik.http.services.frontend.loadbalancer.server.port=3000
+      # Router: Varnish Public
+      - traefik.http.routers.frontend-varnish.rule=Host(`plone.localhost`)
+      - traefik.http.routers.frontend-varnish.entrypoints=http
+      - traefik.http.routers.frontend-varnish.service=varnish
+      - traefik.http.routers.frontend-varnish.middlewares=gzip
+      # Router: Internal
+      - traefik.http.routers.frontend.rule=Host(`plone.localhost`) && Headers(`X-Varnish-Routed`, `1`)
+      - traefik.http.routers.frontend.entrypoints=http
+      - traefik.http.routers.frontend.service=frontend
     depends_on:
       - backend
+    ports:
+      - "3000:3000"
 
   backend:
     build:
@@ -37,5 +73,55 @@ services:
     environment:
       SITE: Plone
       PROFILES: "plone.app.caching:with-caching-proxy"
+    labels:
+      - traefik.enable=true
+      - traefik.constraint-label=public
+      # Service
+      - traefik.http.services.backend.loadbalancer.server.port=8080
+      # Middleware
+      - "traefik.http.middlewares.backend-vhm.replacepathregex.regex=^/\\+\\+api\\+\\+($$|/.*)"
+      - "traefik.http.middlewares.backend-vhm.replacepathregex.replacement=/VirtualHostBase/http/plone.localhost/Plone/++api++/VirtualHostRoot$$1"
+      - "traefik.http.middlewares.backend-ui.replacepathregex.regex=^/ClassicUI($$|/.*)"
+      - "traefik.http.middlewares.backend-ui.replacepathregex.replacement=/VirtualHostBase/http/plone.localhost/Plone/VirtualHostRoot/_vh_ClassicUI$$1"
+      # Router: Varnish Public
+      - traefik.http.routers.backend-varnish.rule=Host(`plone.localhost`) && PathPrefix(`/++api++`)
+      - traefik.http.routers.backend-varnish.entrypoints=http
+      - traefik.http.routers.backend-varnish.service=varnish
+      - traefik.http.routers.backend.middlewares=gzip
+
+      - traefik.http.routers.backend-cl-varnish.rule=Host(`plone.localhost`) && PathPrefix(`/ClassicUI`)
+      - traefik.http.routers.backend-cl-varnish.entrypoints=http
+      - traefik.http.routers.backend-cl-varnish.service=varnish
+      - traefik.http.routers.backend-cl-varnish.middlewares=gzip
+
+      # Router: Internal
+      - traefik.http.routers.backend.rule=Host(`plone.localhost`) && PathPrefix(`/++api++`) && Headers(`X-Varnish-Routed`, `1`)
+      - traefik.http.routers.backend.entrypoints=http
+      - traefik.http.routers.backend.service=backend
+      - traefik.http.routers.backend.middlewares=gzip,backend-vhm
+
+      - traefik.http.routers.backend-cl.rule=Host(`plone.localhost`) && PathPrefix(`/ClassicUI`) && Headers(`X-Varnish-Routed`, `1`)
+      - traefik.http.routers.backend-cl.entrypoints=http
+      - traefik.http.routers.backend-cl.service=backend
+      - traefik.http.routers.backend-cl.middlewares=gzip,backend-ui
+
     ports:
-    - "8080:8080"
+      - "8080:8080"
+
+  varnish:
+    image: varnish:7.1.0
+    volumes:
+      - ./etc/varnish.vcl:/etc/varnish/default.vcl
+    labels:
+      - traefik.enable=true
+      - traefik.constraint-label=public
+      # SERVICE
+      - traefik.http.services.varnish.loadbalancer.server.port=80
+    networks:
+      default:
+        aliases:
+          - plone.localhost
+    ports:
+      - "8000:80"
+    depends_on:
+      - backend

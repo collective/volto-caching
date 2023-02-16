@@ -37,8 +37,13 @@ def test_get_content_via_express(
     ],
 )
 def test_get_content_via_varnish_no_cache(
-    anon_client, url: str, status_code: int, mime_type: str
+    anon_client,
+    purge_url,
+    url: str,
+    status_code: int,
+    mime_type: str,
 ):
+    purge_url(url)
     response = anon_client.get(url)
     assert response.status_code == status_code
     assert mime_type in response.headers["Content-Type"]

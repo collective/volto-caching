@@ -3,63 +3,72 @@ vcl 4.0;
 import std;
 import directors;
 
-/* Configure zope clients as backends */
-
-backend client_01_8080 {
-  .host = "backend";
-  .port = "8080";
-  .connect_timeout = 0.4s;
-  .first_byte_timeout = 300s;
-  .between_bytes_timeout = 60s;
-  .probe = {
-    .url = "/ok";
-    .timeout = 5s;
-    .interval = 15s;
-    .window = 10;
-    .threshold = 8;
-  }
+backend traefik_loadbalancer {
+    .host = "webserver";
+    .port = "80";
+    .connect_timeout = 2s;
+    .first_byte_timeout = 300s;
+    .between_bytes_timeout  = 60s;
 }
 
-
 /* Only allow PURGE from localhost and API-Server */
-acl purge_allowed {
+acl purge {
   "localhost";
   "backend";
   "127.0.0.1";
   "172.16.0.0/12";
+  "10.0.0.0/8";
   "192.168.0.0/16";
 }
 
+
+sub detect_auth{
+  unset req.http.x-auth;
+  if (
+      (req.http.Cookie && (
+        req.http.Cookie ~ "__ac(_(name|password|persistent))?=" || req.http.Cookie ~ "_ZopeId" || req.http.Cookie ~ "auth_token")) ||
+      (req.http.Authenticate) ||
+      (req.http.Authorization)
+  ) {
+    set req.http.x-auth = true;
+  }
+}
+
+
+sub detect_requesttype{
+  unset req.http.x-varnish-reqtype;
+  set req.http.x-varnish-reqtype = "Default";
+  if (req.http.x-auth){
+    set req.http.x-varnish-reqtype = "auth";
+  } elseif (req.url ~ "\/@@(images|download|)\/?(.*)?$"){
+    set req.http.x-varnish-reqtype = "blob";
+  } elseif (req.url ~ "\/\+\+api\+\+/?(.*)?$") {
+    set req.http.x-varnish-reqtype = "api";
+  } else {
+    set req.http.x-varnish-reqtype = "express";
+  }
+}
+
 sub vcl_init {
-  # Use round_robin director type
-  new cluster = directors.round_robin();
-  cluster.add_backend(client_01_8080);
+  new cluster_loadbalancer = directors.round_robin();
+  cluster_loadbalancer.add_backend(traefik_loadbalancer);
 }
 
 sub vcl_recv {
-  # Send requests to the cluster using a round robin director
-  set req.backend_hint = cluster.backend();
+  set req.backend_hint = cluster_loadbalancer.backend();
+  set req.http.X-Varnish-Routed = "1";
 
-  # Sanitize compression handling
-  if (req.http.Accept-Encoding) {
-    if (req.url ~ "\.(jpg|png|gif|gz|tgz|bz2|tbz|mp3|ogg)$") {
-        # No point in compressing these
-        unset req.http.Accept-Encoding;
-    } elsif (req.http.Accept-Encoding ~ "gzip") {
-        set req.http.Accept-Encoding = "gzip";
-    } elsif (req.http.Accept-Encoding ~ "deflate" && req.http.user-agent !~ "MSIE") {
-        set req.http.Accept-Encoding = "deflate";
-    } else {
-        # unknown algorithm
-        unset req.http.Accept-Encoding;
-    }
-  }
+  # Annotate request with x-auth indicating if request is authenticated or not
+  call detect_auth;
+
+  # Annotate request with x-varnish-reqtype with a classification for the request
+  call detect_requesttype;
 
   # Sanitize cookies so they do not needlessly destroy cacheability for anonymous pages
   if (req.http.Cookie) {
     set req.http.Cookie = ";" + req.http.Cookie;
     set req.http.Cookie = regsuball(req.http.Cookie, "; +", ";");
-    set req.http.Cookie = regsuball(req.http.Cookie, ";(sticky|I18N_LANGUAGE|statusmessages|__ac|_ZopeId|__cp|beaker\.session|authomatic|serverid|__rf)=", "; \1=");
+    set req.http.Cookie = regsuball(req.http.Cookie, ";(sticky|I18N_LANGUAGE|statusmessages|__ac|_ZopeId|__cp|beaker\.session|authomatic|serverid|__rf|auth_token)=", "; \1=");
     set req.http.Cookie = regsuball(req.http.Cookie, ";[^ ][^;]*", "");
     set req.http.Cookie = regsuball(req.http.Cookie, "^[; ]+|[; ]+$", "");
 
@@ -68,31 +77,46 @@ sub vcl_recv {
     }
   }
 
-  # POST, Logins and edits
-  if (req.method == "POST" || req.method == "PATCH" || req.method == "DELETE") {
-      return(pass);
-  } elsif (req.method == "PURGE" || req.method == "BAN") {
-    if (client.ip !~ purge_allowed) {
-        return (synth(403, req.method + " not allowed from " + client.ip + ". Access denied."));
-    }
-    if (!req.http.x-invalidate-pattern) {
-        # Purge
-        return (purge);
-    }
-    if (std.ban(req.http.x-invalidate-pattern)) {
-        return (synth(200, "BAN added " + req.http.x-invalidate-pattern));
-    } else {
-        return (synth(400, std.ban_error()));
-    }
-  }
-
-  /* If user is validated, PASS, unconditionally */
-  if (req.http.Authorization) {
+  if (req.http.x-auth) {
     return(pass);
   }
 
-  return(hash);
+  if (req.method == "PURGE") {
+      if (!client.ip ~ purge) {
+          return (synth(405, "Not allowed."));
+      } else {
+          ban("req.url == " + req.url);
+          return (synth(200, "Purged."));
+      }
 
+  } elseif (req.method == "BAN") {
+      # Same ACL check as above:
+      if (!client.ip ~ purge) {
+          return (synth(405, "Not allowed."));
+      }
+      ban("req.http.host == " + req.http.host + "&& req.url == " + req.url);
+      # Throw a synthetic page so the
+      # request won't go to the backend.
+      return (synth(200, "Ban added"));
+
+  } elseif (req.method != "GET" &&
+      req.method != "HEAD" &&
+      req.method != "PUT" &&
+      req.method != "POST" &&
+      req.method != "PATCH" &&
+      req.method != "TRACE" &&
+      req.method != "OPTIONS" &&
+      req.method != "DELETE") {
+      /* Non-RFC2616 or CONNECT which is weird. */
+      return (pipe);
+  } elseif (req.method != "GET" &&
+      req.method != "HEAD" &&
+      req.method != "OPTIONS") {
+      /* POST, PUT, PATCH will pass, always */
+      return(pass);
+  }
+
+  return(hash);
 }
 
 sub vcl_pipe {
@@ -119,6 +143,8 @@ sub vcl_hit {
 
 sub vcl_backend_response {
 
+  set beresp.http.x-varnish-reqtype = bereq.http.x-varnish-reqtype;
+
   # Don't allow static files to set cookies.
   # (?i) denotes case insensitive in PCRE (perl compatible regular expressions).
   # make sure you edit both and keep them equal.
@@ -126,13 +152,13 @@ sub vcl_backend_response {
     unset beresp.http.set-cookie;
   }
   if (beresp.http.Set-Cookie) {
-    set beresp.http.X-Varnish-Action = "FETCH (pass - response sets cookie)";
+    set beresp.http.x-varnish-action = "FETCH (pass - response sets cookie)";
     set beresp.uncacheable = true;
     set beresp.ttl = 120s;
     return(deliver);
   }
   if (beresp.http.Cache-Control ~ "(private|no-cache|no-store)") {
-    set beresp.http.X-Varnish-Action = "FETCH (pass - cache control disallows)";
+    set beresp.http.x-varnish-action = "FETCH (pass - cache control disallows)";
     set beresp.uncacheable = true;
     set beresp.ttl = 120s;
     return(deliver);
@@ -142,53 +168,58 @@ sub vcl_backend_response {
   # Do NOT cache if there is an "Authorization" header
   # beresp never has an Authorization header in beresp, right?
   if (beresp.http.Authorization) {
-    set beresp.http.X-Varnish-Action = "FETCH (pass - authorized and no public cache control)";
+    set beresp.http.x-varnish-action = "FETCH (pass - authorized and no public cache control)";
     set beresp.uncacheable = true;
     set beresp.ttl = 120s;
     return(deliver);
   }
 
+  # Use this rule IF no cache-control
+  if ((bereq.http.x-varnish-reqtype ~ "express") && (!beresp.http.Cache-Control)) {
+    set beresp.http.x-varnish-action = "INSERT (10s caching)";
+    set beresp.uncacheable = false;
+    set beresp.ttl = 10s;
+    set beresp.grace = 20s;
+    return(deliver);
+  }
+
   if (!beresp.http.Cache-Control) {
-    set beresp.http.X-Varnish-Action = "FETCH (override - backend not setting cache control)";
+    set beresp.http.x-varnish-action = "FETCH (override - backend not setting cache control)";
     set beresp.uncacheable = true;
     set beresp.ttl = 120s;
     return (deliver);
   }
 
   if (beresp.http.X-Anonymous && !beresp.http.Cache-Control) {
-    set beresp.http.X-Varnish-Action = "FETCH (override - anonymous backend not setting cache control)";
+    set beresp.http.x-varnish-action = "FETCH (override - anonymous backend not setting cache control)";
     set beresp.ttl = 600s;
     return (deliver);
   }
 
-  set beresp.http.X-Varnish-Action = "FETCH (insert)";
-  if (bereq.http.x-vcl-debug) {
-    set beresp.http.x-varnish-uncacheable = beresp.uncacheable;
-    set beresp.http.x-varnish-ttl = beresp.ttl;
-    set beresp.http.x-varnish-grace = beresp.grace;
-  }
-
+  set beresp.http.x-varnish-action = "FETCH (insert)";
   return (deliver);
 }
 
 sub vcl_deliver {
 
-  set resp.http.X-Powered-By = "Plone (https://plone.org)";
+  set resp.http.x-powered-by = "Plone (https://plone.org)";
 
-  if (obj.hits > 0) {
-    set resp.http.X-Cache = "HIT";
+  if (req.http.x-vcl-debug) {
+    set resp.http.x-varnish-ttl = obj.ttl;
+    set resp.http.x-varnish-grace = obj.grace;
+    set resp.http.x-hits = obj.hits;
+    set resp.http.x-varnish-reqtype = req.http.x-varnish-reqtype;
+    if (req.http.x-auth) {
+      set resp.http.x-auth = "Logged-in";
+    } else {
+      set resp.http.x-auth = "Anon";
+    }
+    if (obj.hits > 0) {
+      set resp.http.x-cache = "HIT";
+    } else {
+      set resp.http.x-cache = "MISS";
+    }
   } else {
-    set resp.http.X-Cache = "MISS";
-  }
-
-  set resp.http.X-Hits = obj.hits;
-  set resp.http.X-TTL = obj.ttl;
-  set resp.http.X-Grace = obj.grace;
-
-  # User is validated
-  if (req.http.Authorization) {
-    set resp.http.X-Auth = "Logged-in";
-  } else {
-    set resp.http.X-Auth = "Anon";
+    unset resp.http.x-varnish-action;
   }
 }
