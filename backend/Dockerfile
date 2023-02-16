@@ -2,5 +2,5 @@
 FROM plone/plone-backend:6.0.1
 
 RUN <<EOT
-    ./bin/pip install "plone.restapi==8.34.0"
+    ./bin/pip install "https://github.com/plone/plone.restapi/archive/refs/heads/issue-1587-purge.zip"
 EOT

@@ -9,19 +9,19 @@ import httpx
 # pytest
 import pytest
 
-from .helpers import VHM
-
 
 BASE_URL = "http://plone.localhost"
 API_URL = f"{BASE_URL}/++api++"
 
 BACKEND_URL = "http://plone.localhost:8080/Plone"
 
-VARNISH_URL = "http://plone.localhost:8000/"
+VARNISH_URL = "http://plone.localhost:8000"
 
 REPO_DIR = Path(__file__).parent.parent
 
 CONTENTS = Path(REPO_DIR / "tests/data/content.json").resolve()
+
+ACCEPT = "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"  # noQA
 
 
 @pytest.fixture(scope="session")
@@ -40,10 +40,7 @@ def varnish_client() -> httpx.Client:
 def anon_client() -> httpx.Client:
     client = httpx.Client(
         base_url=BASE_URL,
-        headers={
-            "Accept": "application/json",
-            "x-vcl-debug": "1"
-        },
+        headers={"Accept": ACCEPT, "x-vcl-debug": "1"},
     )
     yield client
     client.close()
@@ -63,27 +60,24 @@ def auth_root_client() -> httpx.Client:
 @pytest.fixture(scope="session")
 def auth_client() -> httpx.Client:
     resp = httpx.post(
-        f'{API_URL}/@users',
-        headers={'Accept': 'application/json', 'Content-Type': 'application/json'},
+        f"{API_URL}/@users",
+        headers={"Accept": "application/json", "Content-Type": "application/json"},
         json={
-            'description': 'Professor of Linguistics',
-            'email': 'noam.chomsky@example.com',
-            'fullname': 'Noam Avram Chomsky',
-            'home_page': 'web.mit.edu/chomsky',
-            'location': 'Cambridge, MA',
-            'password': '12345678',
-            'roles': ['Manager'],
-            'username': 'noamchomsky'
+            "description": "Professor of Linguistics",
+            "email": "noam.chomsky@example.com",
+            "fullname": "Noam Avram Chomsky",
+            "home_page": "web.mit.edu/chomsky",
+            "location": "Cambridge, MA",
+            "password": "12345678",
+            "roles": ["Manager"],
+            "username": "noamchomsky",
         },
-        auth=('admin', 'admin')
+        auth=("admin", "admin"),
     )
     response = httpx.post(
-        f'{API_URL}/@login',
-        headers={'Accept': 'application/json', 'Content-Type': 'application/json'},
-        json={
-            'password': '12345678',
-            'login': 'noamchomsky'
-        },
+        f"{API_URL}/@login",
+        headers={"Accept": "application/json", "Content-Type": "application/json"},
+        json={"password": "12345678", "login": "noamchomsky"},
     )
     data = response.json()
     token = data["token"]
@@ -91,9 +85,9 @@ def auth_client() -> httpx.Client:
     client = httpx.Client(
         base_url=BASE_URL,
         headers={
-            "Accept": "application/json",
+            "Accept": ACCEPT,
             "x-vcl-debug": "1",
-            "Authorization": f"Bearer {token}"
+            "Authorization": f"Bearer {token}",
         },
     )
     yield client
@@ -120,12 +114,11 @@ def site(auth_root_client, init_data, varnish_client):
     # Check if api is up
     while True:
         try:
-            response = varnish_client.get(
-                "/++api++/"
-            )
+            response = varnish_client.get("/++api++/")
             assert response.status_code == 200
-        except:
+        except Exception as exc:
             sleep(5)
+
         else:
             # API is up
             break

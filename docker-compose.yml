@@ -80,7 +80,7 @@ services:
       - traefik.http.services.backend.loadbalancer.server.port=8080
       # Middleware
       - "traefik.http.middlewares.backend-vhm.replacepathregex.regex=^/\\+\\+api\\+\\+($$|/.*)"
-      - "traefik.http.middlewares.backend-vhm.replacepathregex.replacement=/VirtualHostBase/http/plone.localhost/Plone/++api++/VirtualHostRoot/$$1"
+      - "traefik.http.middlewares.backend-vhm.replacepathregex.replacement=/VirtualHostBase/http/plone.localhost/Plone/++api++/VirtualHostRoot$$1"
       - "traefik.http.middlewares.backend-ui.replacepathregex.regex=^/ClassicUI($$|/.*)"
       - "traefik.http.middlewares.backend-ui.replacepathregex.replacement=/VirtualHostBase/http/plone.localhost/Plone/VirtualHostRoot/_vh_ClassicUI$$1"
       # Router: Varnish Public
@@ -117,6 +117,10 @@ services:
       - traefik.constraint-label=public
       # SERVICE
       - traefik.http.services.varnish.loadbalancer.server.port=80
+    networks:
+      default:
+        aliases:
+          - plone.localhost
     ports:
       - "8000:80"
     depends_on:

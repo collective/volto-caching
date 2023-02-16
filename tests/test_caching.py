@@ -1,3 +1,4 @@
+# Standard Library
 from time import sleep
 
 # pytest
@@ -8,8 +9,11 @@ import pytest
 def caching(auth_client):
     # Enable caching, disable purge
     url = "/++api++/@registry"
+    headers = auth_client.headers
+    headers["Accept"] = "application/json"
     auth_client.patch(
         url,
+        headers=headers,
         json={
             "plone.caching.interfaces.ICacheSettings.enabled": True,
             "plone.cachepurging.interfaces.ICachePurgingSettings.enabled": False,
@@ -45,14 +49,15 @@ def test_varnish_in_front_of_express_cache(anon_client, purge_url, url: str):
     # Passing via Varnish
     assert headers.get("x-varnish") is not None
     assert headers.get("x-varnish-reqtype") == "express"
-    assert headers.get("x-hits") == '0'
-    assert headers.get("x-varnish-ttl") == '10.000'
+    assert headers.get("x-hits") == "0"
+    assert headers.get("x-varnish-ttl") == "10.000"
 
     # Second request will get cached version
-    # Fix me
     response = anon_client.get(url)
     assert response.status_code == 200
-    assert headers.get("x-hits") == '0'
+    headers = response.headers
+    assert headers.get("x-hits") == "1"
+    assert float(headers.get("x-varnish-ttl")) < 10000
 
 
 @pytest.mark.parametrize(
