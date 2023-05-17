@@ -21,24 +21,6 @@ acl purge {
   "192.168.0.0/16";
 }
 
-sub detect_debug{
-  # Requests with X-Varnish-Debug will display additional
-  # information about requests
-  unset req.http.x-vcl-debug;
-  # Should be changed after switch to live
-  if (req.http.x-varnish-debug) {
-      set req.http.x-vcl-debug = false;
-  }
-}
-
-sub detect_protocol{
-  unset req.http.X-Forwarded-Proto;
-  if (req.http.X-Forwarded-Port == "443") {
-    set req.http.X-Forwarded-Proto = "https";
-  } else {
-    set req.http.X-Forwarded-Proto = "http";
-  }
-}
 
 sub detect_auth{
   unset req.http.x-auth;
@@ -51,6 +33,7 @@ sub detect_auth{
     set req.http.x-auth = true;
   }
 }
+
 
 sub detect_requesttype{
   unset req.http.x-varnish-reqtype;
@@ -74,9 +57,6 @@ sub vcl_init {
 sub vcl_recv {
   set req.backend_hint = cluster_loadbalancer.backend();
   set req.http.X-Varnish-Routed = "1";
-
-  # Annotate request with x-forwarded-proto
-  call detect_protocol;
 
   # Annotate request with x-auth indicating if request is authenticated or not
   call detect_auth;
@@ -230,6 +210,9 @@ sub vcl_backend_response {
 }
 
 sub vcl_deliver {
+
+  set resp.http.x-powered-by = "Plone (https://plone.org)";
+
   if (req.http.x-vcl-debug) {
     set resp.http.x-varnish-ttl = obj.ttl;
     set resp.http.x-varnish-grace = obj.grace;
@@ -247,8 +230,5 @@ sub vcl_deliver {
     }
   } else {
     unset resp.http.x-varnish-action;
-    unset resp.http.x-cache-operation;
-    unset resp.http.x-cache-rule;
-    unset resp.http.x-powered-by;
   }
 }
