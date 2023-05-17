@@ -1,1 +1,2 @@
-FROM plone/plone-frontend:16.10.0
+# syntax=docker/dockerfile:1
+FROM plone/plone-frontend:16.20.6

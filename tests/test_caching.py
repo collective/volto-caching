@@ -50,14 +50,14 @@ def test_varnish_in_front_of_express_cache(anon_client, purge_url, url: str):
     assert headers.get("x-varnish") is not None
     assert headers.get("x-varnish-reqtype") == "express"
     assert headers.get("x-hits") == "0"
-    assert headers.get("x-varnish-ttl") == "10.000"
+    assert headers.get("x-varnish-ttl") == "30.000"
 
     # Second request will get cached version
     response = anon_client.get(url)
     assert response.status_code == 200
     headers = response.headers
     assert headers.get("x-hits") == "1"
-    assert float(headers.get("x-varnish-ttl")) < 10000
+    assert float(headers.get("x-varnish-ttl")) < 30000
 
 
 @pytest.mark.parametrize(

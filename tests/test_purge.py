@@ -124,7 +124,8 @@ def test_auto_purge_image(anon_client, auth_client, purge_url):
         json={"title": f"New Page Document {now}"},
     )
     assert response.status_code == 204
-    sleep(1.0)
+    # Sleep a bit longer to allow purger to propagate
+    sleep(2.0)
 
     headers = anon_client.get(url).headers
     assert is_cache_hit(headers) is False

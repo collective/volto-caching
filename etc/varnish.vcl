@@ -21,6 +21,20 @@ acl purge {
   "192.168.0.0/16";
 }
 
+sub detect_protocol{
+  unset req.http.X-Forwarded-Proto;
+  set req.http.X-Forwarded-Proto = "http";
+}
+
+sub detect_debug{
+  # Requests with X-Varnish-Debug will display additional
+  # information about requests
+  unset req.http.x-vcl-debug;
+  # Should be changed after switch to live
+  if (req.http.x-varnish-debug) {
+      set req.http.x-vcl-debug = false;
+  }
+}
 
 sub detect_auth{
   unset req.http.x-auth;
@@ -33,7 +47,6 @@ sub detect_auth{
     set req.http.x-auth = true;
   }
 }
-
 
 sub detect_requesttype{
   unset req.http.x-varnish-reqtype;
@@ -49,6 +62,17 @@ sub detect_requesttype{
   }
 }
 
+sub process_redirects{
+  // Add manual redurect
+  if (req.url ~ "^/old-folder/(.*)") {
+    set req.http.x-redirect-to = regsub(req.url, "^/old-folder/(.*)", "^/new-folder/\1");
+  }
+
+  if (req.http.x-redirect-to) {
+    return (synth(301, req.http.x-redirect-to));
+  }
+}
+
 sub vcl_init {
   new cluster_loadbalancer = directors.round_robin();
   cluster_loadbalancer.add_backend(traefik_loadbalancer);
@@ -58,11 +82,22 @@ sub vcl_recv {
   set req.backend_hint = cluster_loadbalancer.backend();
   set req.http.X-Varnish-Routed = "1";
 
+  # Annotate request with x-forwarded-proto
+  # We always serve requests over https, but talk to Traefik
+  # and then to Volto and Plone using http.
+  call detect_protocol;
+
+  # Annotate request with x-vcl-debug
+  call detect_debug;
+
   # Annotate request with x-auth indicating if request is authenticated or not
   call detect_auth;
 
   # Annotate request with x-varnish-reqtype with a classification for the request
   call detect_requesttype;
+
+  # Process redirects
+  call process_redirects;
 
   # Sanitize cookies so they do not needlessly destroy cacheability for anonymous pages
   if (req.http.Cookie) {
@@ -152,8 +187,6 @@ sub vcl_hit {
 
 sub vcl_backend_response {
 
-  set beresp.http.x-varnish-reqtype = bereq.http.x-varnish-reqtype;
-
   # Don't allow static files to set cookies.
   # (?i) denotes case insensitive in PCRE (perl compatible regular expressions).
   # make sure you edit both and keep them equal.
@@ -183,12 +216,12 @@ sub vcl_backend_response {
     return(deliver);
   }
 
-  # Use this rule IF no cache-control
+  # Use this rule IF no cache-control (SSR content)
   if ((bereq.http.x-varnish-reqtype ~ "express") && (!beresp.http.Cache-Control)) {
-    set beresp.http.x-varnish-action = "INSERT (10s caching)";
+    set beresp.http.x-varnish-action = "INSERT (30s caching / 60s grace)";
     set beresp.uncacheable = false;
-    set beresp.ttl = 10s;
-    set beresp.grace = 20s;
+    set beresp.ttl = 30s;
+    set beresp.grace = 60s;
     return(deliver);
   }
 
@@ -211,8 +244,6 @@ sub vcl_backend_response {
 
 sub vcl_deliver {
 
-  set resp.http.x-powered-by = "Plone (https://plone.org)";
-
   if (req.http.x-vcl-debug) {
     set resp.http.x-varnish-ttl = obj.ttl;
     set resp.http.x-varnish-grace = obj.grace;
@@ -230,5 +261,8 @@ sub vcl_deliver {
     }
   } else {
     unset resp.http.x-varnish-action;
+    unset resp.http.x-cache-operation;
+    unset resp.http.x-cache-rule;
+    unset resp.http.x-powered-by;
   }
 }

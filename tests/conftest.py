@@ -40,7 +40,7 @@ def varnish_client() -> httpx.Client:
 def anon_client() -> httpx.Client:
     client = httpx.Client(
         base_url=BASE_URL,
-        headers={"Accept": ACCEPT, "x-vcl-debug": "1"},
+        headers={"Accept": ACCEPT, "x-varnish-debug": "1"},
     )
     yield client
     client.close()
@@ -50,7 +50,7 @@ def anon_client() -> httpx.Client:
 def auth_root_client() -> httpx.Client:
     client = httpx.Client(
         base_url=BASE_URL,
-        headers={"Accept": "application/json"},
+        headers={"Accept": "application/json", "x-varnish-debug": "1"},
         auth=("admin", "admin"),
     )
     yield client
@@ -86,7 +86,7 @@ def auth_client() -> httpx.Client:
         base_url=BASE_URL,
         headers={
             "Accept": ACCEPT,
-            "x-vcl-debug": "1",
+            "x-varnish-debug": "1",
             "Authorization": f"Bearer {token}",
         },
     )
