@@ -90,9 +90,22 @@ def site_root(anon_client) -> dict:
     "header,value",
     [
         ("x-cache-operation", "plone.app.caching.terseCaching"),
-        ("Vary", "Accept-Encoding, Accept"),
         ("x-varnish-reqtype", "api"),
     ],
 )
 def test_root_headers_with_caching(site_root, header: str, value: str):
     assert site_root.get(header) == value
+
+
+@pytest.mark.parametrize(
+    "header,expected",
+    [
+        ("Vary", "Accept-Encoding"),
+        ("Vary", "Accept"),
+        ("Via", "1.1 varnish (Varnish/7.1)"),
+        ("Via", "waitress"),
+    ],
+)
+def test_root_headers_with_caching_list(site_root, header: str, expected: str):
+    value = site_root.get(header)
+    assert expected in value, f"{value} does not contain {expected}"

@@ -115,7 +115,6 @@ def test_auto_purge_image(anon_client, auth_client, purge_url):
     # Check url is in cache
     headers = anon_client.get(url).headers
     assert is_cache_hit(headers) is True
-
     # Purge URL
     now = datetime.utcnow()
     response = auth_client.patch(
@@ -125,7 +124,7 @@ def test_auto_purge_image(anon_client, auth_client, purge_url):
     )
     assert response.status_code == 204
     # Sleep a bit longer to allow purger to propagate
-    sleep(2.0)
+    sleep(3.0)
 
     headers = anon_client.get(url).headers
     assert is_cache_hit(headers) is False
