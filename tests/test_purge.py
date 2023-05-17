@@ -22,7 +22,7 @@ def caching(auth_client):
             "plone.caching.interfaces.ICacheSettings.enabled": True,
             "plone.cachepurging.interfaces.ICachePurgingSettings.enabled": True,
             "plone.cachepurging.interfaces.ICachePurgingSettings.cachingProxies": [
-                "http://plone.localhost:80"
+                "http://purger:80"
             ],
             "plone.cachepurging.interfaces.ICachePurgingSettings.domains": [],
             "plone.cachepurging.interfaces.ICachePurgingSettings.virtualHosting": False,
