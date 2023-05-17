@@ -1,5 +1,6 @@
 # Standard Library
 import json
+import subprocess
 from pathlib import Path
 from time import sleep
 
@@ -15,7 +16,15 @@ API_URL = f"{BASE_URL}/++api++"
 
 BACKEND_URL = "http://plone.localhost:8080/Plone"
 
-VARNISH_URL = "http://plone.localhost:8000"
+VARNISH_PORT = (
+    subprocess.run(
+        ["docker", "compose", "port", "varnish", "80"], capture_output=True, text=True
+    )
+    .stdout.strip()
+    .split(":")[1]
+)
+s
+VARNISH_URL = f"http://plone.localhost:{VARNISH_PORT}"
 
 REPO_DIR = Path(__file__).parent.parent
 
