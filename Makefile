@@ -63,7 +63,7 @@ stop-containers: ## Stop containers
 	@docker-compose down
 
 .PHONY: tests
-tests: ## Stop containers
+tests: ## Run Tests
 	bin/pytest tests
 
 .PHONY: run
