@@ -23,8 +23,10 @@ VARNISH_PORT = (
     .stdout.strip()
     .split(":")[1]
 )
-s
+
 VARNISH_URL = f"http://plone.localhost:{VARNISH_PORT}"
+
+VARNISH_MULTIPLE_URL = ["http://plone.localhost:8000", "http://plone.localhost:8001"]
 
 REPO_DIR = Path(__file__).parent.parent
 
@@ -43,6 +45,19 @@ def varnish_client() -> httpx.Client:
     client = httpx.Client(base_url=VARNISH_URL, headers={"Host": "plone.localhost"})
     yield client
     client.close()
+
+
+@pytest.fixture(scope="session")
+def varnish_multiple_clients() -> list:
+    clients = []
+    for v_url in VARNISH_MULTIPLE_URL:
+        client = httpx.Client(
+            base_url=v_url, headers={"Host": "plone.localhost", "x-varnish-debug": "1"}
+        )
+        clients.append(client)
+    yield clients
+    for client in clients:
+        client.close()
 
 
 @pytest.fixture(scope="session")
@@ -166,5 +181,21 @@ def purge_url(varnish_client: httpx.Client):
             url=url,
         )
         return response.status_code == 200
+
+    return inner
+
+
+@pytest.fixture
+def purge_multiple_varnish_url(varnish_multiple_clients: list):
+    def inner(url: str = "") -> bool:
+        success = True
+        for varnish_client in varnish_multiple_clients:
+            response = varnish_client.request(
+                method="PURGE",
+                url=url,
+            )
+            if response.status_code != 200:
+                success = False
+        return success
 
     return inner
