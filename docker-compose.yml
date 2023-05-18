@@ -129,6 +129,6 @@ services:
         aliases:
           - plone.localhost
     ports:
-      - "8000:80"
+      - "8000-8001:80"
     depends_on:
       - backend
