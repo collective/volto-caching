@@ -1,37 +1,114 @@
-[tool.black]
-line-length = 88
-target-version = ['py37']
-include = '\.pyi?$'
-exclude = '''
-/(
-    \.git
-  | \.pytest_cache
-  | docs
-  | requirements
-)/
-'''
+[project]
+name = "volto-caching"
+version = "20260707.0.0"
+description = "Volto caching tests"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "httpx[http2]>=0.28.1",
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+    "pytest-docker>=3.2.5",
+]
 
-[tool.isort]
-sections = 'FUTURE,STDLIB,HTTP,CLI,PYTEST,THIRDPARTY,FIRSTPARTY,LOCALFOLDER'
-force_single_line = true
-known_future_library = 'future,pies'
-known_pytest = 'pytest,py.test,pytest_asyncio,pytest_docker_fixtures,freezegun'
-known_http = 'httpx'
-known_cli = 'typer'
-known_first_party = ''
-import_heading_stdlib = 'Standard Library'
-import_heading_http = 'HTTP Library'
-import_heading_cli = 'CLI Library'
-import_heading_pytest = 'pytest'
-import_heading_firstparty = 'Volto'
-lines_after_imports = 2
-include_trailing_comma = true
-force_grid_wrap = false
-combine_as_imports = true
-line_length = 88
+[tool.towncrier]
+name = "volto-caching"
+directory = "news/"
+filename = "CHANGELOG.md"
+start_string = "<!-- towncrier release notes start -->\n"
+title_format = "## {version} ({project_date})"
+template = "news/.changelog_template.jinja"
+underlines = ["", "", ""]
+issue_format = "[#{issue}](https://github.com/collective/volto-caching/issue/{issue})"
+
+[[tool.towncrier.type]]
+directory = "breaking"
+name = "Breaking"
+showcontent = true
+
+[[tool.towncrier.type]]
+directory = "feature"
+name = "Feature"
+showcontent = true
+
+[[tool.towncrier.type]]
+directory = "bugfix"
+name = "Bugfix"
+showcontent = true
+
+[[tool.towncrier.type]]
+directory = "internal"
+name = "Internal"
+showcontent = true
+
+[[tool.towncrier.type]]
+directory = "documentation"
+name = "Documentation"
+showcontent = true
+
+[[tool.towncrier.type]]
+directory = "test"
+name = "Test"
+showcontent = true
+
+[tool.ruff]
+line-length = 88
+fix = true
+lint.select = [
+    # flake8-2020
+    "YTT",
+    # flake8-bandit
+    "S",
+    # flake8-bugbear
+    "B",
+    # flake8-builtins
+    "A",
+    # flake8-comprehensions
+    "C4",
+    # flake8-debugger
+    "T10",
+    # flake8-simplify
+    "SIM",
+    # mccabe
+    "C90",
+    # pycodestyle
+    "E", "W",
+    # pyflakes
+    "F",
+    # pygrep-hooks
+    "PGH",
+    # pyupgrade
+    "UP",
+    # ruff
+    "RUF",
+]
+lint.ignore = [
+    # DoNotAssignLambda
+    "E731",
+]
+
+[tool.ruff.lint.isort]
+case-sensitive = false
+no-sections = true
+force-single-line = true
+from-first = true
+lines-after-imports = 2
+lines-between-types = 1
+
+[tool.ruff.format]
+preview = true
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S101"]
+
+[tool.mypy]
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
-asyncio_mode = "strict"
-testpaths = [
-    "tests",
+testpaths = ["tests"]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.15.20",
+    "towncrier>=25.8.0",
 ]

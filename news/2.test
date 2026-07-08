@@ -1,0 +1,1 @@
+Adapted the test suite to the upgraded stack, hardened the cache assertions, and reworked the multi-Varnish scaling helpers. @ericof

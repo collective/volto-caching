@@ -1,7 +1,5 @@
-# Standard Library
 from time import sleep
 
-# pytest
 import pytest
 
 
@@ -57,7 +55,7 @@ def test_varnish_in_front_of_express_cache(anon_client, purge_url, url: str):
     assert response.status_code == 200
     headers = response.headers
     assert headers.get("x-hits") == "1"
-    assert float(headers.get("x-varnish-ttl")) < 30000
+    assert float(headers.get("x-varnish-ttl")) < 30
 
 
 @pytest.mark.parametrize(
@@ -102,8 +100,8 @@ def test_root_headers_with_caching(site_root, header: str, value: str):
     [
         ("Vary", "Accept-Encoding"),
         ("Vary", "Accept"),
-        ("Via", "1.1 varnish (Varnish/7.1)"),
-        ("Via", "waitress"),
+        ("Via", "waitress, 1.1"),
+        ("Via", "(Varnish/8.0)"),
     ],
 )
 def test_root_headers_with_caching_list(site_root, header: str, expected: str):

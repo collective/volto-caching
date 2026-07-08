@@ -1,0 +1,1 @@
+Migrated the project setup to `uv` and replaced `black`/`isort` with `ruff`; added `towncrier` for changelog management. @ericof
