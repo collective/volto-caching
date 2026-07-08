@@ -68,23 +68,23 @@ format: ## Check and fix code base according to Plone standards
 .PHONY: containers-prepare
 containers-prepare: ## Get container images
 	@echo "$(GREEN)==> Getting container images $(RESET)"
-	@docker-compose build
-	@docker-compose pull
+	@docker compose build
+	@docker compose pull
 
 .PHONY: containers-start
 containers-start: ## Start containers
 	@echo "$(GREEN)==> Starting containers $(RESET)"
-	@docker-compose up -d && sleep 10
+	@docker compose up -d && sleep 10
 
 .PHONY: reload-varnish-config
 reload-varnish-config: ## Reload Varnish configuration
 	@echo "$(GREEN)==> Reloading Varnish configuration $(RESET)"
-	@docker-compose exec varnish varnishreload
+	@docker compose exec varnish varnishreload
 
 .PHONY: containers-stop
 containers-stop: ## Stop containers
 	@echo "$(GREEN)==> Stopping containers $(RESET)"
-	@docker-compose down
+	@docker compose down
 
 ############################################
 # Tests
