@@ -1,7 +1,5 @@
-# Standard Library
 from time import sleep
 
-# pytest
 import pytest
 
 

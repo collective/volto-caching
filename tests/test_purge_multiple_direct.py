@@ -1,9 +1,7 @@
-# Standard Library
-import subprocess
+from datetime import UTC
 from datetime import datetime
 from time import sleep
 
-# pytest
 import pytest
 
 
@@ -13,7 +11,7 @@ def is_cache_hit(headers: dict) -> bool:
 
 
 @pytest.fixture(scope="module", autouse=True)
-def multicaching(auth_client):
+def multicaching(auth_client, varnish_scale):
     # Enable caching
     url = "/++api++/@registry"
     auth_client.patch(
@@ -34,12 +32,10 @@ def multicaching(auth_client):
                 "News Item",
                 "Document",
             ],
-            "plone.cachepurging.interfaces.ICachePurgingSettings.domains": [],
         },
     )
     # spawn second varnish container and wait a second for it to start
-    subprocess.run(["docker", "compose", "up", "--scale", "varnish=2", "-d"])
-    sleep(1.0)
+    varnish_scale(2)
     yield "Enabled"
     # Disable caching, disable purge
     auth_client.patch(
@@ -51,8 +47,8 @@ def multicaching(auth_client):
         },
     )
     # disable second varnish container
-    subprocess.run(["docker", "compose", "up", "--scale", "varnish=0", "-d"])
-    subprocess.run(["docker", "compose", "up", "--scale", "varnish=1", "-d"])
+    varnish_scale(0)
+    varnish_scale(1)
 
 
 def test_manual_purge_works(
@@ -94,12 +90,12 @@ def test_auto_purge_document(
         anon_client.get(url)
 
         # Check url is in cache
-        for i in range(5):
+        for _ in range(5):
             headers = anon_client.get(url).headers
             assert is_cache_hit(headers) is True
 
     # Edit page, should trigger purges
-    now = datetime.utcnow()
+    now = datetime.now(UTC)
     response = auth_client.patch(
         f"/++api++{base_url}",
         headers={"Accept": "application/json", "Content-Type": "application/json"},
@@ -108,7 +104,8 @@ def test_auto_purge_document(
     assert response.status_code == 204
     sleep(2.0)
 
-    # To make sure content has been purged in every varnish instance we have to check varnish directly
+    # To make sure content has been purged in every varnish instance
+    # we have to check varnish directly
     for varnish_client in varnish_multiple_clients:
         url = base_url
         headers = varnish_client.get(url).headers
@@ -135,9 +132,9 @@ def test_auto_purge_image(
         headers = client.get(url).headers
         assert is_cache_hit(headers) is True
     # Purge URL
-    now = datetime.utcnow()
+    now = datetime.now(UTC)
     response = auth_client.patch(
-        f"/++api++/{base_url}",
+        f"/++api++{base_url}",
         headers={"Accept": "application/json", "Content-Type": "application/json"},
         json={"title": f"New Page Document {now}"},
     )

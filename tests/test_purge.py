@@ -1,8 +1,7 @@
-# Standard Library
+from datetime import UTC
 from datetime import datetime
 from time import sleep
 
-# pytest
 import pytest
 
 
@@ -33,7 +32,6 @@ def caching(auth_client):
                 "News Item",
                 "Document",
             ],
-            "plone.cachepurging.interfaces.ICachePurgingSettings.domains": [],
         },
     )
     yield "Enabled"
@@ -84,7 +82,7 @@ def test_auto_purge_document(anon_client, auth_client, purge_url):
         assert is_cache_hit(headers) is True
 
     # Edit page, should trigger purges
-    now = datetime.utcnow()
+    now = datetime.now(UTC)
     response = auth_client.patch(
         f"/++api++{base_url}",
         headers={"Accept": "application/json", "Content-Type": "application/json"},
@@ -116,9 +114,9 @@ def test_auto_purge_image(anon_client, auth_client, purge_url):
     headers = anon_client.get(url).headers
     assert is_cache_hit(headers) is True
     # Purge URL
-    now = datetime.utcnow()
+    now = datetime.now(UTC)
     response = auth_client.patch(
-        f"/++api++/{base_url}",
+        f"/++api++{base_url}",
         headers={"Accept": "application/json", "Content-Type": "application/json"},
         json={"title": f"New Page Document {now}"},
     )

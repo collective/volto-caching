@@ -1,12 +1,8 @@
-# Standard Library
-import subprocess
+from datetime import UTC
 from datetime import datetime
 from time import sleep
 
-# HTTP Library
 import httpx
-
-# pytest
 import pytest
 
 
@@ -18,7 +14,7 @@ def is_cache_hit(headers: dict) -> bool:
 # Since we do not have direct access to all varnish containers we have to infer
 # via multiple requests and parsing headers wether a url is cached on both varnish
 # containers
-# Varnish sets the Header x-hits as a counter how often this cached content has been 
+# Varnish sets the Header x-hits as a counter how often this cached content has been
 # accessed. On the first call to a content that has not been cached it is 0.
 # Every call to this (now cached) document will increase the counter by one.
 # If the x-hits counter did not increase by one on two successive calls to a content
@@ -29,18 +25,26 @@ def check_url_against_multiple_varnish(url: str, client: httpx.Client) -> list:
     headers = client.get(url).headers
     hits.append(headers.get("x-cache") == "HIT")
     first_request_hits = int(headers.get("x-hits"))
-    # Second request
-    second_request_hits = first_request_hits + 1
-    while second_request_hits == first_request_hits + 1:
+    # Second request: keep polling until a request lands on a different varnish
+    # instance (its x-hits counter no longer equals first_request_hits + 1).
+    max_attempts = 20
+    for _ in range(max_attempts):
         headers = client.get(url).headers
         second_request_hits = int(headers.get("x-hits"))
+        if second_request_hits != first_request_hits + 1:
+            break
+    else:
+        raise AssertionError(
+            f"Requests to {url} never reached a second varnish instance "
+            f"after {max_attempts} attempts"
+        )
     hits.append(headers.get("x-cache") == "HIT")
 
     return hits
 
 
 @pytest.fixture(scope="module", autouse=True)
-def caching(auth_client):
+def caching(auth_client, varnish_scale):
     # Enable caching
     url = "/++api++/@registry"
     auth_client.patch(
@@ -61,12 +65,10 @@ def caching(auth_client):
                 "News Item",
                 "Document",
             ],
-            "plone.cachepurging.interfaces.ICachePurgingSettings.domains": [],
         },
     )
     # spawn second varnish container and wait a second for it to start
-    subprocess.run(["docker", "compose", "up", "--scale", "varnish=2", "-d"])
-    sleep(1.0)
+    varnish_scale(2)
     yield "Enabled"
     # Disable caching, disable purge
     auth_client.patch(
@@ -78,9 +80,8 @@ def caching(auth_client):
         },
     )
     # disable second varnish container
-    subprocess.run(["docker", "compose", "up", "--scale", "varnish=0", "-d"])
-    subprocess.run(["docker", "compose", "up", "--scale", "varnish=1", "-d"])
-    sleep(5.0)
+    varnish_scale(0)
+    varnish_scale(1)
 
 
 def test_auto_purge_document(anon_client, auth_client, purge_url):
@@ -103,7 +104,7 @@ def test_auto_purge_document(anon_client, auth_client, purge_url):
             assert hit is True
 
     # Edit page, should trigger purges
-    now = datetime.utcnow()
+    now = datetime.now(UTC)
     response = auth_client.patch(
         f"/++api++{base_url}",
         headers={"Accept": "application/json", "Content-Type": "application/json"},
@@ -138,9 +139,9 @@ def test_auto_purge_image(anon_client, auth_client, purge_url):
         assert hit is True
     # Purge URL
 
-    now = datetime.utcnow()
+    now = datetime.now(UTC)
     response = auth_client.patch(
-        f"/++api++/{base_url}",
+        f"/++api++{base_url}",
         headers={"Accept": "application/json", "Content-Type": "application/json"},
         json={"title": f"New Page Document {now}"},
     )
