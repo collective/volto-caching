@@ -1,0 +1,10 @@
+{
+    "recommendations": [
+        "charliermarsh.ruff",
+        "ms-python.python",
+        "thomas-baumgaertner.vcl",
+        "charliermarsh.ruff",
+        "EditorConfig.EditorConfig",
+        "ms-python.vscode-python-envs"
+    ]
+}
