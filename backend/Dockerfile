@@ -1,2 +1,3 @@
 # syntax=docker/dockerfile:1
-FROM plone/plone-backend:6.0.4
+ARG PLONE_VERSION=6.2.1
+FROM plone/plone-backend:${PLONE_VERSION}
